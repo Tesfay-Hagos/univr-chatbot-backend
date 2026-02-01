@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api import chat, admin
-from app.config import APP_ENV, DEBUG
+from app.config import APP_ENV, DEBUG, GEMINI_API_KEY
 
 # Configure logging
 logging.basicConfig(
@@ -31,16 +31,22 @@ STATIC_DIR = BASE_DIR / "static"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
-    logger.info(f"🚀 UniVR Chatbot starting in {APP_ENV} mode")
+    logger.info(f"🚀 ULSS 9 Chatbot starting in {APP_ENV} mode")
+    
+    # Log agent initialization status
+    api_key_status = "✅ Set" if GEMINI_API_KEY else "❌ Not set"
+    logger.info(f"📋 Configuration: API Key {api_key_status} (length: {len(GEMINI_API_KEY) if GEMINI_API_KEY else 0})")
+    logger.info(f"🤖 Agent client initialized: {chat.agent.client is not None}")
+    
     yield
-    logger.info("👋 UniVR Chatbot shutting down")
+    logger.info("👋 ULSS 9 Chatbot shutting down")
 
 
 # Create FastAPI app
 app = FastAPI(
-    title="UniVR Chatbot",
-    description="RAG-based chatbot for University of Verona student services",
-    version="0.1.0",
+    title="ULSS 9 Chatbot",
+    description="RAG-based assistant for Azienda ULSS 9 Scaligera (informazioni generali, orari, sedi, servizi, documenti)",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -73,4 +79,4 @@ async def home(request: Request):
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Heroku."""
-    return {"status": "healthy", "app": "univr-chatbot"}
+    return {"status": "healthy", "app": "ulss9-chatbot"}

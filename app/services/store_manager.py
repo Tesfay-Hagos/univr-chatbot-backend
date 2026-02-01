@@ -7,6 +7,7 @@ Each store represents a RAG domain (e.g., scholarships, admissions).
 
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -44,7 +45,11 @@ class StoreManager:
         """Initialize the store manager."""
         self.client = None
         if GEMINI_API_KEY:
-            self.client = genai.Client()
+            try:
+                self.client = genai.Client(api_key=GEMINI_API_KEY)
+                logger.debug("StoreManager: Gemini client initialized")
+            except Exception as e:
+                logger.error(f"StoreManager: Failed to initialize Gemini client: {e}", exc_info=True)
     
     def _get_store_display_name(self, domain: str) -> str:
         """Generate store display name from domain."""
@@ -150,73 +155,103 @@ class StoreManager:
             logger.error(f"Error deleting store: {e}")
             return False
     
-    async def upload_document(self, file_path: str, domain: str) -> dict:
+    async def upload_document(
+        self,
+        file_path: str,
+        domain: str,
+        *,
+        source_type: str = "attachment",
+        title_override: Optional[str] = None,
+        url: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> dict:
         """
         Upload a document to a domain's File Search Store.
         Replaces existing documents with the same filename.
-        
+
         Args:
             file_path: Path to the file to upload
-            domain: Domain to upload to
-            
+            domain: Domain (store id) to upload to
+            source_type: "attachment" (uploaded doc) or "website" (ingested page)
+            title_override: Use this title instead of extracted title
+            url: For website source, canonical URL on aulss9.veneto.it
+            document_id: Stable id for attachments (for links in chat response); generated if not set
+
         Returns:
-            dict with upload status
+            dict with upload status (includes document_id for attachments)
         """
         if not self.client:
             raise ValueError("Gemini client not initialized. Check API key.")
-        
+
         store = self.get_store(domain)
         if not store:
             raise ValueError(f"Store for domain '{domain}' not found. Create it first.")
-        
+
         file_name = Path(file_path).name
-        
+        if source_type == "attachment" and not document_id:
+            document_id = uuid.uuid4().hex
+
         # Upload file temporarily for metadata extraction
         logger.info(f"Uploading {file_name} for processing...")
         temp_file = self.client.files.upload(file=file_path)
-        
+
         # Wait for file to be ready
         while temp_file.state.name == "PROCESSING":
             time.sleep(2)
             temp_file = self.client.files.get(name=temp_file.name)
-        
+
         if temp_file.state.name != "ACTIVE":
             raise RuntimeError(f"File upload failed with state: {temp_file.state.name}")
-        
+
         # Extract metadata using Gemini
         metadata = await self._extract_metadata(temp_file, domain)
-        
+        title = title_override or metadata.title
+
         # Check for and delete existing version (replace duplicate)
         await self._delete_existing(store, file_name)
-        
+
+        # Build custom_metadata: base + source_type and optional url/document_id
+        custom_metadata = [
+            {"key": "title", "string_value": title},
+            {"key": "file_name", "string_value": file_name},
+            {"key": "domain", "string_value": domain},
+            {"key": "abstract", "string_value": metadata.abstract},
+            {"key": "source_type", "string_value": source_type},
+        ]
+        if url:
+            custom_metadata.append({"key": "url", "string_value": url})
+        if document_id:
+            custom_metadata.append({"key": "document_id", "string_value": document_id})
+
         # Import to File Search Store with metadata
         operation = self.client.file_search_stores.upload_to_file_search_store(
             file_search_store_name=store.name,
             file=file_path,
             config={
-                "display_name": metadata.title,
-                "custom_metadata": [
-                    {"key": "title", "string_value": metadata.title},
-                    {"key": "file_name", "string_value": file_name},
-                    {"key": "domain", "string_value": domain},
-                    {"key": "abstract", "string_value": metadata.abstract},
-                ],
+                "display_name": title,
+                "custom_metadata": custom_metadata,
             },
         )
-        
+
         # Wait for indexing to complete
         while not operation.done:
             time.sleep(3)
             operation = self.client.operations.get(operation)
-        
-        logger.info(f"Document '{file_name}' uploaded and indexed to domain '{domain}'")
-        
-        return {
+
+        logger.info(f"Document '{file_name}' uploaded and indexed to domain '{domain}' (source_type={source_type})")
+
+        result = {
             "success": True,
             "filename": file_name,
-            "title": metadata.title,
-            "domain": domain
+            "title": title,
+            "domain": domain,
+            "source_type": source_type,
         }
+        if document_id:
+            result["document_id"] = document_id
+        if url:
+            result["url"] = url
+        return result
     
     async def _extract_metadata(self, temp_file, domain: str) -> DocumentMetadata:
         """Extract metadata from a document using Gemini."""

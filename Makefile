@@ -14,7 +14,7 @@ install-dev:
 # Run the FastAPI development server
 dev:
 	@echo "==============================================================================="
-	@echo "| 🚀 Starting UniVR Chatbot development server...                            |"
+	@echo "| 🚀 ULSS 9 Scaligera – Backend (port 8000)                                  |"
 	@echo "==============================================================================="
 	uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
@@ -43,31 +43,13 @@ clean:
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 
-# Frontend (Next.js) commands
-install-frontend:
-	cd frontend && npm install
-
-frontend-dev:
-	@echo "==============================================================================="
-	@echo "| 🎨 Starting Next.js frontend development server...                         |"
-	@echo "==============================================================================="
-	cd frontend && npm run dev
-
-frontend-build:
-	cd frontend && npm run build
-
-frontend-start:
-	cd frontend && npm run start
-
-frontend-lint:
-	cd frontend && npm run lint
-
-# Run both backend and frontend in parallel (requires running in separate terminals)
+# Full stack: run backend here; run chatbot and admin-board from their repos
 dev-all:
 	@echo "==============================================================================="
-	@echo "| 🚀 Starting both backend and frontend servers...                           |"
-	@echo "| Run 'make dev' in one terminal and 'make frontend-dev' in another.         |"
+	@echo "| Backend runs here (make dev). Frontends are separate repos:                |"
+	@echo "|   chatbot/       → make dev   (user chat)                                   |"
+	@echo "|   admin-board/   → make dev   (admin panel)                                 |"
 	@echo "==============================================================================="
-	@echo "Tip: Use 'make dev' and 'make frontend-dev' in separate terminals."
+	@$(MAKE) dev
 
-.PHONY: install install-jupyter install-dev dev run lint lint-fix test clean install-frontend frontend-dev frontend-build frontend-start frontend-lint dev-all
+.PHONY: install install-jupyter install-dev dev run lint lint-fix test clean dev-all

@@ -10,6 +10,8 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
+from app.config import ULSS9_STORES
+from app.services.extra_stores import set_extra_description
 from app.services.store_manager import StoreManager, StoreInfo
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,8 @@ class UploadResponse(BaseModel):
     filename: str
     domain: str
     message: str
+    document_id: str | None = None
+    title: str | None = None
 
 
 class DocumentInfo(BaseModel):
@@ -57,14 +61,15 @@ class DocumentInfo(BaseModel):
 @router.post("/stores", response_model=CreateStoreResponse)
 async def create_store(request: CreateStoreRequest):
     """
-    Create a new File Search Store for a domain.
-    
-    This creates a new RAG domain that can be used for document uploads and queries.
+    Create a new File Search Store (category) for RAG.
+    Use for stores beyond the four initial areas (Allegato A).
+    Saves the description so store selection can include this category.
     """
     try:
         store_manager = StoreManager()
         store = await store_manager.create_store(request.domain, request.description)
-        
+        if request.description:
+            set_extra_description(request.domain, request.description)
         return CreateStoreResponse(
             success=True,
             domain=request.domain,
@@ -94,15 +99,60 @@ async def delete_store(domain: str):
     try:
         store_manager = StoreManager()
         success = await store_manager.delete_store(domain)
-        
+
         if not success:
             raise HTTPException(status_code=404, detail=f"Store '{domain}' not found")
-        
+
         return {"success": True, "message": f"Store '{domain}' deleted"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Delete store error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stores/delete-all")
+async def delete_all_stores():
+    """
+    Delete all File Search Stores (with the app's STORE_PREFIX) from Gemini.
+    Use this to clear everything before creating the 4 ULSS 9 stores.
+    """
+    try:
+        store_manager = StoreManager()
+        stores = await store_manager.list_stores()
+        deleted = []
+        for s in stores:
+            try:
+                ok = await store_manager.delete_store(s.domain)
+                if ok:
+                    deleted.append(s.domain)
+                    logger.info(f"Deleted store: {s.domain}")
+            except Exception as e:
+                logger.warning(f"Failed to delete store {s.domain}: {e}")
+        return {
+            "success": True,
+            "message": f"Deleted {len(deleted)} store(s) from Gemini.",
+            "deleted": deleted,
+        }
+    except Exception as e:
+        logger.error(f"Delete all stores error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stores/ulss9/create-all")
+async def create_all_ulss9_stores():
+    """Create the four initial stores from Allegato A (idempotent). Others can be added via POST /stores."""
+    try:
+        store_manager = StoreManager()
+        created = []
+        for s in ULSS9_STORES:
+            domain = s["id"]
+            desc = s.get("description", "")
+            store = await store_manager.create_store(domain, desc)
+            created.append({"domain": domain, "store_name": store.name})
+        return {"success": True, "message": "ULSS 9 stores ensured", "stores": created}
+    except Exception as e:
+        logger.error(f"Create all ULSS9 stores error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -133,19 +183,26 @@ async def upload_document(
         
         logger.info(f"Saved file: {file_path}")
         
-        # Upload to File Search Store
+        # Upload to File Search Store (attached doc: source_type=attachment, document_id for links)
         store_manager = StoreManager()
-        result = await store_manager.upload_document(str(file_path), domain)
-        
+        result = await store_manager.upload_document(
+            str(file_path),
+            domain,
+            source_type="attachment",
+        )
         return UploadResponse(
             success=True,
             filename=file.filename,
             domain=domain,
-            message=f"Document '{file.filename}' uploaded to '{domain}' domain"
+            message=f"Document '{file.filename}' uploaded to '{domain}' domain",
+            document_id=result.get("document_id"),
+            title=result.get("title"),
         )
         
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Upload error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

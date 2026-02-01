@@ -27,9 +27,11 @@ Oregon (US West)
 
 **Root Directory:**
 ```
-univr-chatbot-backend
+(Leave EMPTY)
 ```
-(Important: Set this if your repo has both frontend and backend)
+⚠️ **Important:** 
+- If your GitHub repo is `univr-chatbot-backend` (backend-only repo), leave Root Directory **EMPTY**
+- Only set Root Directory if your repo is a monorepo with both frontend and backend folders
 
 **Branch:**
 ```
